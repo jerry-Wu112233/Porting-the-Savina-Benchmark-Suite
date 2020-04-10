@@ -2,7 +2,8 @@ package edu.rice.habanero.actors
 
 import java.util.concurrent.atomic.AtomicBoolean
 
-import akka.actor.{Actor, ActorRef, ActorSystem}
+import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext}
+import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
 import com.typesafe.config.{Config, ConfigFactory}
 import edu.rice.hj.runtime.util.ModCountDownLatch
 
@@ -16,12 +17,12 @@ import scala.util.{Failure, Success}
  *
  * @author <a href="http://shams.web.rice.edu/">Shams Imam</a> (shams@rice.edu)
  */
-abstract class AkkaActor[MsgType] extends Actor {
+abstract class AkkaActor[MsgType](context: ActorContext[Any]) extends AbstractBehavior[Any](context) {
 
   private val startTracker = new AtomicBoolean(false)
   private val exitTracker = new AtomicBoolean(false)
 
-  final def receive = {
+  final def receive: Any = {
     case msg: StartAkkaActorMessage =>
       if (hasStarted()) {
         msg.resolve(value = false)
@@ -38,15 +39,15 @@ abstract class AkkaActor[MsgType] extends Actor {
 
   def process(msg: MsgType): Unit
 
-  def send(msg: MsgType) {
-    self ! msg
+  def send(msg: Nothing) {
+    context.self ! msg
   }
 
-  final def hasStarted() = {
+  final def hasStarted(): Boolean = {
     startTracker.get()
   }
 
-  final def start() = {
+  final def start(): Unit = {
     if (!hasStarted()) {
       onPreStart()
       onPostStart()
@@ -57,24 +58,24 @@ abstract class AkkaActor[MsgType] extends Actor {
   /**
    * Convenience: specify code to be executed before actor is started
    */
-  protected def onPreStart() = {
+  protected def onPreStart(): Unit = {
   }
 
   /**
    * Convenience: specify code to be executed after actor is started
    */
-  protected def onPostStart() = {
+  protected def onPostStart(): Unit = {
   }
 
-  final def hasExited() = {
+  final def hasExited(): Boolean = {
     exitTracker.get()
   }
 
-  final def exit() = {
+  final def exit(): Unit = {
     val success = exitTracker.compareAndSet(false, true)
     if (success) {
       onPreExit()
-      context.stop(self)
+      context.stop(context.self)
       onPostExit()
       AkkaActorState.actorLatch.countDown()
     }
@@ -83,13 +84,13 @@ abstract class AkkaActor[MsgType] extends Actor {
   /**
    * Convenience: specify code to be executed before actor is terminated
    */
-  protected def onPreExit() = {
+  protected def onPreExit(): Unit = {
   }
 
   /**
    * Convenience: specify code to be executed after actor is terminated
    */
-  protected def onPostExit() = {
+  protected def onPostExit(): Unit = {
   }
 }
 
@@ -179,11 +180,12 @@ object AkkaActorState {
     propOrElse(propName, defaultVal)
   }
 
-  def newActorSystem(name: String): ActorSystem = {
-    ActorSystem(name, config)
+  def newActorSystem[T](name: String, behavior : Behavior[T]): ActorSystem[T] = {
+
+    ActorSystem(behavior, name, config)
   }
 
-  def startActor(actorRef: ActorRef) {
+  def startActor(actorRef: ActorRef[StartAkkaActorMessage]): Unit = {
 
     AkkaActorState.actorLatch.updateCount()
 
@@ -197,12 +199,12 @@ object AkkaActorState {
         if (!value) {
           AkkaActorState.actorLatch.countDown()
         }
-      case Failure(e) => e.printStackTrace
+      case Failure(e) => e.printStackTrace()
     }
 
   }
 
-  def awaitTermination(system: ActorSystem) {
+  def awaitTermination(system: ActorSystem[Any]) {
     try {
       actorLatch.await()
       system.terminate()
