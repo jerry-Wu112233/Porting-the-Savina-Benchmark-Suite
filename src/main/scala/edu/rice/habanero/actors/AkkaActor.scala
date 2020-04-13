@@ -204,7 +204,7 @@ object AkkaActorState {
 
   }
 
-  def awaitTermination(system: ActorSystem[Any]) {
+  def awaitTermination(system: ActorSystem[Nothing]) {
     try {
       actorLatch.await()
       system.terminate()

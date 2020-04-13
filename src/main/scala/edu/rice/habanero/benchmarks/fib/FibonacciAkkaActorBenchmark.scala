@@ -1,8 +1,11 @@
 package edu.rice.habanero.benchmarks.fib
 
-import akka.actor.{ActorRef, Props}
+
+import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
+import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
 import edu.rice.habanero.actors.{AkkaActor, AkkaActorState}
 import edu.rice.habanero.benchmarks.{Benchmark, BenchmarkRunner}
+import edu.rice.hj.runtime.actors.Message
 
 /**
  *
@@ -10,10 +13,19 @@ import edu.rice.habanero.benchmarks.{Benchmark, BenchmarkRunner}
  */
 object FibonacciAkkaActorBenchmark {
 
+  trait NoRefsMessage extends Message {
+    def refs: Iterable[ActorRef[Nothing]] = Seq()
+  }
+  sealed trait FibMessage extends Message
+  final case class Request(n: Int) extends FibMessage
+  final case class Response(value: Int) extends FibMessage
+
   def main(args: Array[String]) {
     BenchmarkRunner.runBenchmark(args, new FibonacciAkkaActorBenchmark)
   }
-
+  def apply() : Behavior[FibMessage] = {
+    Behaviors.setup(context => context.spawn(FibonacciActor(context), "Fibonacci"))
+  }
   private final class FibonacciAkkaActorBenchmark extends Benchmark {
     def initialize(args: Array[String]) {
       FibonacciConfig.parseArgs(args)
@@ -25,9 +37,9 @@ object FibonacciAkkaActorBenchmark {
 
     def runIteration() {
 
-      val system = AkkaActorState.newActorSystem("Fibonacci")
+      val system = AkkaActorState.newActorSystem("Fibonacci", FibonacciActor())
 
-      val fjRunner = system.actorOf(Props(new FibonacciActor(null)))
+      val fjRunner = system.spawn(new FibonacciActor(null))) // spawn() is not a method for the ActorSystem
       AkkaActorState.startActor(fjRunner)
       fjRunner ! Request(FibonacciConfig.N)
 
@@ -38,47 +50,44 @@ object FibonacciAkkaActorBenchmark {
     }
   }
 
-  private case class Request(n: Int)
-
-  private case class Response(value: Int)
-
   private val RESPONSE_ONE = Response(1)
 
 
-  private class FibonacciActor(parent: ActorRef) extends AkkaActor[AnyRef] {
-
+  private class FibonacciActor(context: ActorContext[FibMessage]) extends AbstractBehavior[FibMessage](context) {
+    import FibonacciAkkaActorBenchmark._
     private var result = 0
     private var respReceived = 0
 
-    override def process(msg: AnyRef) {
+    override def onMessage(msg: FibMessage): Behavior[FibMessage] = {
 
       msg match {
-        case req: Request =>
+        case Request(n) =>
 
-          if (req.n <= 2) {
+          if (n <= 2) {
 
             result = 1
             processResult(RESPONSE_ONE)
+            Behaviors.stopped
 
           } else {
 
-            val f1 = context.system.actorOf(Props(new FibonacciActor(self)))
-            AkkaActorState.startActor(f1)
-            f1 ! Request(req.n - 1)
+            val f1 = context.spawn(FibonacciActor(context.self), "Actor_f1")
+            f1 ! Request(n - 1)
 
-            val f2 = context.system.actorOf(Props(new FibonacciActor(self)))
-            AkkaActorState.startActor(f2)
-            f2 ! Request(req.n - 2)
+            val f2 = context.spawn(FibonacciActor(context.self), "Actor_f2")
+            f2 ! Request(n - 2)
 
           }
+          Behaviors.same
 
-        case resp: Response =>
+        case Response(value) =>
 
           respReceived += 1
-          result += resp.value
+          result += value
 
           if (respReceived == 2) {
             processResult(Response(result))
+
           }
       }
     }
@@ -90,7 +99,7 @@ object FibonacciAkkaActorBenchmark {
         println(" Result = " + result)
       }
 
-      exit()
+      Behaviors.stopped
     }
   }
 
