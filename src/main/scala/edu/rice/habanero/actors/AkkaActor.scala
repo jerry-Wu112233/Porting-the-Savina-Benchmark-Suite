@@ -2,7 +2,7 @@ package edu.rice.habanero.actors
 
 import java.util.concurrent.atomic.AtomicBoolean
 
-import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext}
+import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
 import com.typesafe.config.{Config, ConfigFactory}
 import edu.rice.hj.runtime.util.ModCountDownLatch
@@ -22,7 +22,7 @@ abstract class AkkaActor[MsgType](context: ActorContext[Any]) extends AbstractBe
   private val startTracker = new AtomicBoolean(false)
   private val exitTracker = new AtomicBoolean(false)
 
-  final def receive: Any = {
+  final override def onMessage(msg: Any): Behavior[Any] = msg match{
     case msg: StartAkkaActorMessage =>
       if (hasStarted()) {
         msg.resolve(value = false)
@@ -30,11 +30,12 @@ abstract class AkkaActor[MsgType](context: ActorContext[Any]) extends AbstractBe
         start()
         msg.resolve(value = true)
       }
-
+      Behaviors.same
     case msg: Any =>
       if (!exitTracker.get()) {
         process(msg.asInstanceOf[MsgType])
       }
+      Behaviors.same
   }
 
   def process(msg: MsgType): Unit

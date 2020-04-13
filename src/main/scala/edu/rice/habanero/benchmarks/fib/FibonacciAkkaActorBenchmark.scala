@@ -23,9 +23,7 @@ object FibonacciAkkaActorBenchmark {
   def main(args: Array[String]) {
     BenchmarkRunner.runBenchmark(args, new FibonacciAkkaActorBenchmark)
   }
-  def apply() : Behavior[FibMessage] = {
-    Behaviors.setup(context => context.spawn(FibonacciActor(context), "Fibonacci"))
-  }
+
   private final class FibonacciAkkaActorBenchmark extends Benchmark {
     def initialize(args: Array[String]) {
       FibonacciConfig.parseArgs(args)
@@ -37,11 +35,10 @@ object FibonacciAkkaActorBenchmark {
 
     def runIteration() {
 
-      val system = AkkaActorState.newActorSystem("Fibonacci", FibonacciActor())
+      val system = AkkaActorState.newActorSystem("Fibonacci", FibonacciActor(null))
 
-      val fjRunner = system.spawn(new FibonacciActor(null))) // spawn() is not a method for the ActorSystem
-      AkkaActorState.startActor(fjRunner)
-      fjRunner ! Request(FibonacciConfig.N)
+      AkkaActorState.startActor(system)
+      system ! Request(FibonacciConfig.N)
 
       AkkaActorState.awaitTermination(system)
     }
@@ -49,16 +46,22 @@ object FibonacciAkkaActorBenchmark {
     def cleanupIteration(lastIteration: Boolean, execTimeMillis: Double) {
     }
   }
+  object FibonacciActor {
+    def apply(parent: ActorRef[FibMessage]): Behavior[Any] = {
+      Behaviors.setup(context => new FibonacciActor(context, parent))
+    }
+
+  }
 
   private val RESPONSE_ONE = Response(1)
 
 
-  private class FibonacciActor(context: ActorContext[FibMessage]) extends AbstractBehavior[FibMessage](context) {
-    import FibonacciAkkaActorBenchmark._
+  private class FibonacciActor(context: ActorContext[Any], parent : ActorRef[FibMessage]) extends AkkaActor[FibMessage](context) {
+
     private var result = 0
     private var respReceived = 0
 
-    override def onMessage(msg: FibMessage): Behavior[FibMessage] = {
+    override def process(msg: FibMessage): Unit = {
 
       msg match {
         case Request(n) =>
@@ -67,7 +70,7 @@ object FibonacciAkkaActorBenchmark {
 
             result = 1
             processResult(RESPONSE_ONE)
-            Behaviors.stopped
+
 
           } else {
 
@@ -78,7 +81,7 @@ object FibonacciAkkaActorBenchmark {
             f2 ! Request(n - 2)
 
           }
-          Behaviors.same
+
 
         case Response(value) =>
 
@@ -99,7 +102,7 @@ object FibonacciAkkaActorBenchmark {
         println(" Result = " + result)
       }
 
-      Behaviors.stopped
+      exit()
     }
   }
 
