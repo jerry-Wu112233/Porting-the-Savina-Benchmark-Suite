@@ -2,6 +2,7 @@ package edu.rice.habanero.actors
 
 import java.util.concurrent.atomic.AtomicBoolean
 
+import akka.actor.PoisonPill
 import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
 import com.typesafe.config.{Config, ConfigFactory}
@@ -75,23 +76,9 @@ abstract class AkkaActor[MsgType](context: ActorContext[Any]) extends AbstractBe
   final def exit(): Unit = {
     val success = exitTracker.compareAndSet(false, true)
     if (success) {
-      onPreExit()
-      context.stop(context.self)
-      onPostExit()
       AkkaActorState.actorLatch.countDown()
+      context.stop(context.self)
     }
-  }
-
-  /**
-   * Convenience: specify code to be executed before actor is terminated
-   */
-  protected def onPreExit(): Unit = {
-  }
-
-  /**
-   * Convenience: specify code to be executed after actor is terminated
-   */
-  protected def onPostExit(): Unit = {
   }
 }
 

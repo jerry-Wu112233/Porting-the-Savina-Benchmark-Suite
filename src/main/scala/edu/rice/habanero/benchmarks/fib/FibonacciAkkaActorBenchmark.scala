@@ -98,10 +98,11 @@ object FibonacciAkkaActorBenchmark {
     private def processResult(response: Response) {
       if (parent != null) {
         parent ! response
+
       } else {
         println(" Result = " + result)
-      }
 
+      }
       exit()
     }
   }
