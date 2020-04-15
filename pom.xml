@@ -43,7 +43,6 @@
             <artifactId>velocity</artifactId>
             <version>1.7</version>
         </dependency>
-        <!--
         <dependency>
             <groupId>edu.illinois</groupId>
             <artifactId>gc</artifactId>
@@ -51,7 +50,6 @@
             <scope>system</scope>
             <systemPath>${project.basedir}/../akka-gc/target/scala-2.13/akka-gc_2.13-0.1.0-SNAPSHOT.jar</systemPath>
         </dependency>
-        -->
         <dependency>
             <groupId>org.scala-lang</groupId>
             <artifactId>scala-library</artifactId>

@@ -2,10 +2,14 @@ package edu.rice.habanero.actors
 
 import java.util.concurrent.atomic.AtomicBoolean
 
-import akka.actor.PoisonPill
-import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
-import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
+import gc.GCMessage
+//import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
+import gc.Behavior
+import akka.actor.typed
+import akka.actor.typed.ActorSystem
 import com.typesafe.config.{Config, ConfigFactory}
+import gc.{AbstractBehavior, ActorContext, ActorRef, Behaviors}
+
 import edu.rice.hj.runtime.util.ModCountDownLatch
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -31,12 +35,12 @@ abstract class AkkaActor[MsgType](context: ActorContext[Any]) extends AbstractBe
         start()
         msg.resolve(value = true)
       }
-      Behaviors.same
+      this
     case msg: Any =>
       if (!exitTracker.get()) {
         process(msg.asInstanceOf[MsgType])
       }
-      Behaviors.same
+      this
   }
 
   def process(msg: MsgType): Unit
@@ -77,7 +81,6 @@ abstract class AkkaActor[MsgType](context: ActorContext[Any]) extends AbstractBe
     val success = exitTracker.compareAndSet(false, true)
     if (success) {
       AkkaActorState.actorLatch.countDown()
-      context.stop(context.self)
     }
   }
 }
@@ -168,12 +171,11 @@ object AkkaActorState {
     propOrElse(propName, defaultVal)
   }
 
-  def newActorSystem[T](name: String, behavior : Behavior[T]): ActorSystem[T] = {
-
+  def newActorSystem[T](name: String, behavior : typed.Behavior[T]): ActorSystem[T] = {
     ActorSystem(behavior, name, config)
   }
 
-  def startActor(actorRef: ActorRef[StartAkkaActorMessage]): Unit = {
+  def startActor(actorRef: ActorSystem[Any]): Unit = {
 
     AkkaActorState.actorLatch.updateCount()
 

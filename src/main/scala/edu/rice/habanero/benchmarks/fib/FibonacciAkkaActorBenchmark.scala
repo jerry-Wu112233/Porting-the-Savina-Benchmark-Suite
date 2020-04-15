@@ -1,11 +1,11 @@
 package edu.rice.habanero.benchmarks.fib
 
 
-import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
-import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
+
+import gc.{AbstractBehavior, ActorContext, ActorFactory, ActorRef, Behavior, Behaviors, Message}
 import edu.rice.habanero.actors.{AkkaActor, AkkaActorState}
 import edu.rice.habanero.benchmarks.{Benchmark, BenchmarkRunner}
-import edu.rice.hj.runtime.actors.Message
+import akka.actor.typed.{Behavior => AkkaBehavior}
 
 /**
  *
@@ -14,11 +14,11 @@ import edu.rice.hj.runtime.actors.Message
 object FibonacciAkkaActorBenchmark {
 
   trait NoRefsMessage extends Message {
-    def refs: Iterable[ActorRef[Nothing]] = Seq()
+    override def refs: Iterable[ActorRef[Nothing]] = Seq()
   }
   sealed trait FibMessage extends Message
-  final case class Request(n: Int) extends FibMessage
-  final case class Response(value: Int) extends FibMessage
+  final abstract case class Request(n: Int) extends FibMessage with NoRefsMessage
+  final abstract case class Response(value: Int) extends FibMessage with NoRefsMessage
 
   def main(args: Array[String]) {
     BenchmarkRunner.runBenchmark(args, new FibonacciAkkaActorBenchmark)
@@ -47,7 +47,10 @@ object FibonacciAkkaActorBenchmark {
     }
   }
   object FibonacciActor {
-    def apply(parent: ActorRef[FibMessage]): Behavior[Any] = {
+    def apply(parent: ActorRef[FibMessage]): AkkaBehavior[Any] = {
+      Behaviors.setupReceptionist(context => new FibonacciActor(context, parent))
+    }
+    def apply(parent: ActorRef[FibMessage]): ActorFactory[Message] = {
       Behaviors.setup(context => new FibonacciActor(context, parent))
     }
 
