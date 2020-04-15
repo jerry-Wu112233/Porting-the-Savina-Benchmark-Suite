@@ -17,8 +17,8 @@ object FibonacciAkkaActorBenchmark {
     override def refs: Iterable[ActorRef[Nothing]] = Seq()
   }
   sealed trait FibMessage extends Message
-  final abstract case class Request(n: Int) extends FibMessage with NoRefsMessage
-  final abstract case class Response(value: Int) extends FibMessage with NoRefsMessage
+  final case class Request(n: Int) extends FibMessage with NoRefsMessage
+  final case class Response(value: Int) extends FibMessage with NoRefsMessage
 
   def main(args: Array[String]) {
     BenchmarkRunner.runBenchmark(args, new FibonacciAkkaActorBenchmark)
@@ -35,7 +35,7 @@ object FibonacciAkkaActorBenchmark {
 
     def runIteration() {
 
-      val system = AkkaActorState.newActorSystem("Fibonacci", FibonacciActor(null))
+      val system = AkkaActorState.newActorSystem("Fibonacci", FibonacciActor.createRoot(null))
 
       AkkaActorState.startActor(system)
       system ! Request(FibonacciConfig.N)
@@ -47,11 +47,11 @@ object FibonacciAkkaActorBenchmark {
     }
   }
   object FibonacciActor {
-    def apply(parent: ActorRef[FibMessage]): AkkaBehavior[Any] = {
-      Behaviors.setupReceptionist(context => new FibonacciActor(context, parent))
+    def createRoot(parent: ActorRef[FibMessage]): AkkaBehavior[Any] = {
+      Behaviors.setupReceptionist[Any](context => new FibonacciActor(context, parent))
     }
-    def apply(parent: ActorRef[FibMessage]): ActorFactory[Message] = {
-      Behaviors.setup(context => new FibonacciActor(context, parent))
+    def apply(parent: ActorRef[FibMessage]): ActorFactory[Any] = {
+      Behaviors.setup[Any]((context : ActorContext[Any]) => new FibonacciActor(context, parent))
     }
 
   }
