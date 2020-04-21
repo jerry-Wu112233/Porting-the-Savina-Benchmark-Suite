@@ -4,7 +4,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 import akka.actor.typed
 import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
-import gc.{AnyActorRef, Message}
+import gc.{AnyActorRef, AppMsg, GCMessage, Message}
 import akka.actor.typed.{ActorSystem, Behavior}
 import com.typesafe.config.{Config, ConfigFactory}
 import edu.rice.hj.runtime.util.ModCountDownLatch
@@ -189,7 +189,26 @@ object AkkaActorState {
     ActorSystem(behavior, name, config)
   }
 
-  def startActor[T](actorRef: ActorSystem[AkkaMsg[T]]): Unit = {
+  def startActor[T](actorRef: typed.ActorRef[AkkaMsg[T]]): Unit = {
+
+    AkkaActorState.actorLatch.updateCount()
+
+    val promise = Promise[Boolean]()
+    val message = new StartAkkaActorMessage(promise)
+    actorRef ! message
+
+    val f = promise.future
+    f.onComplete {
+      case Success(value) =>
+        if (!value) {
+          AkkaActorState.actorLatch.countDown()
+        }
+      case Failure(e) => e.printStackTrace()
+    }
+
+  }
+
+  def startActor[T](actorRef: gc.ActorRef[AkkaMsg[T]]): Unit = {
 
     AkkaActorState.actorLatch.updateCount()
 

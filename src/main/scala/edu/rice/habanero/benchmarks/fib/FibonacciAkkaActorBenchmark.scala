@@ -75,9 +75,11 @@ object FibonacciAkkaActorBenchmark {
           } else {
 
             val f1 = context.spawn(FibonacciActor(context.self), "Actor_f1")
+            AkkaActorState.startActor(f1)
             f1 ! Request(n - 1)
 
             val f2 = context.spawn(FibonacciActor(context.self), "Actor_f2")
+            AkkaActorState.startActor(f2)
             f2 ! Request(n - 2)
 
           }

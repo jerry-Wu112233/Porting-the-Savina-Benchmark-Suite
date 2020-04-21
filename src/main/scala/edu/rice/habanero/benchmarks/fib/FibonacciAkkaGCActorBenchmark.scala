@@ -83,10 +83,12 @@ object FibonacciAkkaGCActorBenchmark {
           } else {
 
             val f1 = context.spawn(FibonacciGCActor(), "Actor_f1")
+            AkkaActorState.startActor(f1)
             val self1 = context.createRef(context.self, f1)
             f1 ! Request(Some(self1), n - 1)
 
             val f2 = context.spawn(FibonacciGCActor(), "Actor_f2")
+            AkkaActorState.startActor(f2)
             val self2 = context.createRef(context.self, f2)
             f2 ! Request(Some(self2), n - 2)
 
