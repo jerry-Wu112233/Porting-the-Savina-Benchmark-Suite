@@ -2,14 +2,12 @@ package edu.rice.habanero.actors
 
 import java.util.concurrent.atomic.AtomicBoolean
 
-import gc.GCMessage
-//import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
-import gc.Behavior
 import akka.actor.typed
-import akka.actor.typed.ActorSystem
+import akka.actor.typed.{ActorSystem}
 import com.typesafe.config.{Config, ConfigFactory}
-import gc.{AbstractBehavior, ActorContext, ActorRef, Behaviors}
+import gc.{AbstractBehavior, ActorContext, ActorRef, AnyActorRef, Behavior, Behaviors, Message}
 
+import scala.language.implicitConversions
 import edu.rice.hj.runtime.util.ModCountDownLatch
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -22,28 +20,30 @@ import scala.util.{Failure, Success}
  *
  * @author <a href="http://shams.web.rice.edu/">Shams Imam</a> (shams@rice.edu)
  */
-abstract class AkkaActor[MsgType](context: ActorContext[Any]) extends AbstractBehavior[Any](context) {
+abstract class AkkaActor[T](context: ActorContext[AkkaMsg[T]]) extends AbstractBehavior[AkkaMsg[T]](context) {
 
   private val startTracker = new AtomicBoolean(false)
   private val exitTracker = new AtomicBoolean(false)
 
-  final override def onMessage(msg: Any): Behavior[Any] = msg match{
-    case msg: StartAkkaActorMessage =>
-      if (hasStarted()) {
-        msg.resolve(value = false)
-      } else {
-        start()
-        msg.resolve(value = true)
-      }
-      this
-    case msg: Any =>
-      if (!exitTracker.get()) {
-        process(msg.asInstanceOf[MsgType])
-      }
-      this
+  final override def onMessage(msg: AkkaMsg[T]): Behavior[AkkaMsg[T]] =  {
+    msg match{
+      case msg: StartAkkaActorMessage =>
+        if (hasStarted()) {
+          msg.resolve(value = false)
+        } else {
+          start()
+          msg.resolve(value = true)
+        }
+        this
+      case BenchmarkMessage(payload) =>
+        if (!exitTracker.get()) {
+          process(payload)
+        }
+        this
+    }
   }
 
-  def process(msg: MsgType): Unit
+  def process(msg: T): Behavior[AkkaMsg[T]]
 
   def send(msg: Nothing) {
     context.self ! msg
@@ -77,15 +77,21 @@ abstract class AkkaActor[MsgType](context: ActorContext[Any]) extends AbstractBe
     exitTracker.get()
   }
 
-  final def exit(): Unit = {
+  final def exit(): Behavior[AkkaMsg[T]] = {
     val success = exitTracker.compareAndSet(false, true)
     if (success) {
       AkkaActorState.actorLatch.countDown()
+      Behaviors.stopped(context)
     }
+    this
   }
 }
 
-protected class StartAkkaActorMessage(promise: Promise[Boolean]) {
+sealed trait AkkaMsg[+T] extends Message
+
+final case class StartAkkaActorMessage(promise: Promise[Boolean]) extends AkkaMsg[Nothing] {
+  def refs = Seq()
+
   def await() {
     Await.result(promise.future, Duration.Inf)
   }
@@ -93,6 +99,15 @@ protected class StartAkkaActorMessage(promise: Promise[Boolean]) {
   def resolve(value: Boolean) {
     promise.success(value)
   }
+}
+
+final case class BenchmarkMessage[T <: Message](payload: T) extends AkkaMsg[T] {
+  def refs: Iterable[AnyActorRef] = payload.refs
+}
+
+object AkkaImplicits {
+  implicit def liftBenchmarkMessage[T <: Message](msg : T) : BenchmarkMessage[T] =
+    BenchmarkMessage(msg)
 }
 
 object AkkaActorState {
@@ -175,12 +190,12 @@ object AkkaActorState {
     ActorSystem(behavior, name, config)
   }
 
-  def startActor(actorRef: ActorSystem[Any]): Unit = {
+  def startActor[T](actorRef: ActorSystem[AkkaMsg[T]]): Unit = {
 
     AkkaActorState.actorLatch.updateCount()
 
     val promise = Promise[Boolean]()
-    val message: StartAkkaActorMessage = new StartAkkaActorMessage(promise)
+    val message = new StartAkkaActorMessage(promise)
     actorRef ! message
 
     val f = promise.future

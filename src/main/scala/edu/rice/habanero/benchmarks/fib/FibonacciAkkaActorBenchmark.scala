@@ -2,8 +2,9 @@ package edu.rice.habanero.benchmarks.fib
 
 
 
-import gc.{AbstractBehavior, ActorContext, ActorFactory, ActorRef, Behavior, Behaviors, Message}
-import edu.rice.habanero.actors.{AkkaActor, AkkaActorState}
+import gc.{ActorContext, ActorFactory, ActorRef, Behavior, Behaviors, Message}
+import edu.rice.habanero.actors.{AkkaActor, AkkaActorState, AkkaMsg, BenchmarkMessage}
+import edu.rice.habanero.actors.AkkaImplicits._
 import edu.rice.habanero.benchmarks.{Benchmark, BenchmarkRunner}
 import akka.actor.typed.{Behavior => AkkaBehavior}
 
@@ -17,7 +18,9 @@ object FibonacciAkkaActorBenchmark {
     override def refs: Iterable[ActorRef[Nothing]] = Seq()
   }
   sealed trait FibMessage extends Message
-  final case class Request(n: Int) extends FibMessage with NoRefsMessage
+  final case class Request(parent: Option[ActorRef[AkkaMsg[Response]]], n: Int) extends FibMessage {
+    def refs: Iterable[ActorRef[AkkaMsg[Response]]] = parent.toList
+  }
   final case class Response(value: Int) extends FibMessage with NoRefsMessage
 
   def main(args: Array[String]) {
@@ -35,10 +38,10 @@ object FibonacciAkkaActorBenchmark {
 
     def runIteration() {
 
-      val system = AkkaActorState.newActorSystem("Fibonacci", FibonacciActor.createRoot(null))
+      val system = AkkaActorState.newActorSystem("Fibonacci", FibonacciActor.createRoot())
 
       AkkaActorState.startActor(system)
-      system ! Request(FibonacciConfig.N)
+      system ! Request(None, FibonacciConfig.N)
 
       AkkaActorState.awaitTermination(system)
     }
@@ -47,11 +50,11 @@ object FibonacciAkkaActorBenchmark {
     }
   }
   object FibonacciActor {
-    def createRoot(parent: ActorRef[FibMessage]): AkkaBehavior[Any] = {
-      Behaviors.setupReceptionist[Any](context => new FibonacciActor(context, parent))
+    def createRoot(): AkkaBehavior[AkkaMsg[FibMessage]] = {
+      Behaviors.setupReceptionist(context => new FibonacciActor(context))
     }
-    def apply(parent: ActorRef[FibMessage]): ActorFactory[Any] = {
-      Behaviors.setup[Any]((context : ActorContext[Any]) => new FibonacciActor(context, parent))
+    def apply(): ActorFactory[AkkaMsg[FibMessage]] = {
+      Behaviors.setup(context => new FibonacciActor(context))
     }
 
   }
@@ -59,32 +62,39 @@ object FibonacciAkkaActorBenchmark {
   private val RESPONSE_ONE = Response(1)
 
 
-  private class FibonacciActor(context: ActorContext[Any], parent : ActorRef[FibMessage]) extends AkkaActor[FibMessage](context) {
+  private class FibonacciActor(context: ActorContext[AkkaMsg[FibMessage]])
+    extends AkkaActor[FibMessage](context) {
 
     private var result = 0
     private var respReceived = 0
+    private var parent: Option[ActorRef[AkkaMsg[Response]]] = None
 
-    override def process(msg: FibMessage): Unit = {
+    override def process(msg: FibMessage): Behavior[AkkaMsg[FibMessage]] = {
 
       msg match {
-        case Request(n) =>
+        case Request(parent, n) =>
+          this.parent = parent
 
           if (n <= 2) {
 
             result = 1
             processResult(RESPONSE_ONE)
 
-
           } else {
 
-            val f1 = context.spawn(FibonacciActor(context.self), "Actor_f1")
-            f1 ! Request(n - 1)
+            val f1 = context.spawn(FibonacciActor(), "Actor_f1")
+            val self1 = context.createRef(context.self, f1)
+            f1 ! Request(Some(self1), n - 1)
 
-            val f2 = context.spawn(FibonacciActor(context.self), "Actor_f2")
-            f2 ! Request(n - 2)
+            val f2 = context.spawn(FibonacciActor(), "Actor_f2")
+            val self2 = context.createRef(context.self, f2)
+            f2 ! Request(Some(self2), n - 2)
+
+            context.release(Seq(f1, f2))
 
           }
 
+          this
 
         case Response(value) =>
 
@@ -93,18 +103,20 @@ object FibonacciAkkaActorBenchmark {
 
           if (respReceived == 2) {
             processResult(Response(result))
-
+          }
+          else {
+            this
           }
       }
     }
 
-    private def processResult(response: Response) {
-      if (parent != null) {
-        parent ! response
-
-      } else {
-        println(" Result = " + result)
-
+    private def processResult(response: Response): Behavior[AkkaMsg[FibMessage]] = {
+      parent match {
+        case None =>
+          println(" Result = " + result)
+        case Some(actor) =>
+          actor ! response
+          context.release(actor)
       }
       exit()
     }
