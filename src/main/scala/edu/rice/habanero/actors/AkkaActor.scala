@@ -3,13 +3,13 @@ package edu.rice.habanero.actors
 import java.util.concurrent.atomic.AtomicBoolean
 
 import akka.actor.typed
-import akka.actor.typed.{ActorSystem}
+import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
+import gc.{AnyActorRef, Message}
+import akka.actor.typed.{ActorSystem, Behavior}
 import com.typesafe.config.{Config, ConfigFactory}
-import gc.{AbstractBehavior, ActorContext, ActorRef, AnyActorRef, Behavior, Behaviors, Message}
-
-import scala.language.implicitConversions
 import edu.rice.hj.runtime.util.ModCountDownLatch
 
+import scala.language.implicitConversions
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Promise}
@@ -25,10 +25,10 @@ abstract class AkkaActor[T](context: ActorContext[AkkaMsg[T]]) extends AbstractB
   private val startTracker = new AtomicBoolean(false)
   private val exitTracker = new AtomicBoolean(false)
 
-  final override def onMessage(msg: AkkaMsg[T]): Behavior[AkkaMsg[T]] =  {
+  final override def onMessage(msg: AkkaMsg[T]): Behavior[AkkaMsg[T]] =
     msg match{
       case msg: StartAkkaActorMessage =>
-        if (hasStarted()) {
+        if (hasStarted) {
           msg.resolve(value = false)
         } else {
           start()
@@ -41,7 +41,6 @@ abstract class AkkaActor[T](context: ActorContext[AkkaMsg[T]]) extends AbstractB
         }
         this
     }
-  }
 
   def process(msg: T): Behavior[AkkaMsg[T]]
 
@@ -49,12 +48,12 @@ abstract class AkkaActor[T](context: ActorContext[AkkaMsg[T]]) extends AbstractB
     context.self ! msg
   }
 
-  final def hasStarted(): Boolean = {
+  final def hasStarted: Boolean = {
     startTracker.get()
   }
 
   final def start(): Unit = {
-    if (!hasStarted()) {
+    if (!hasStarted) {
       onPreStart()
       onPostStart()
       startTracker.set(true)
@@ -73,7 +72,7 @@ abstract class AkkaActor[T](context: ActorContext[AkkaMsg[T]]) extends AbstractB
   protected def onPostStart(): Unit = {
   }
 
-  final def hasExited(): Boolean = {
+  final def hasExited: Boolean = {
     exitTracker.get()
   }
 
@@ -81,7 +80,7 @@ abstract class AkkaActor[T](context: ActorContext[AkkaMsg[T]]) extends AbstractB
     val success = exitTracker.compareAndSet(false, true)
     if (success) {
       AkkaActorState.actorLatch.countDown()
-      Behaviors.stopped(context)
+      Behaviors.stopped
     }
     this
   }
