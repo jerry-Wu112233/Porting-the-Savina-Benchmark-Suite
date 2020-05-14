@@ -1,4 +1,3 @@
-
 package edu.rice.habanero.benchmarks.quicksort
 
 import java.util
@@ -15,7 +14,7 @@ import gc.Message
  *
  * @author <a href="http://shams.web.rice.edu/">Shams Imam</a> (shams@rice.edu)
  */
-object QuickSortAkkaActorBenchmark {
+object QuicksortAkkaGCActorBenchmark {
 
   def main(args: Array[String]) {
     BenchmarkRunner.runBenchmark(args, new QuickSortAkkaActorBenchmark)
