@@ -1,8 +1,8 @@
 package edu.rice.habanero.actors
 
 import java.util.concurrent.atomic.AtomicBoolean
-
-import gc.{AbstractBehavior, ActorContext, ActorRef, AnyActorRef, Behavior, Behaviors, Message}
+import akka.actor.typed.scaladsl.Behaviors
+import gc.{AbstractBehavior, ActorContext, ActorRef, AnyActorRef, Behavior, Message}
 
 
 /**
@@ -69,7 +69,7 @@ abstract class AkkaGCActor[T](context: ActorContext[AkkaMsg[T]]) extends Abstrac
     val success = exitTracker.compareAndSet(false, true)
     if (success) {
       AkkaActorState.actorLatch.countDown()
-      Behaviors.stopped(context)
+      Behaviors.stopped
     }
     this
   }
