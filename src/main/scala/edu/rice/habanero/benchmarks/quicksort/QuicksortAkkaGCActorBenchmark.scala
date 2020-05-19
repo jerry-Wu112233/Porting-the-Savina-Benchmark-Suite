@@ -2,13 +2,14 @@ package edu.rice.habanero.benchmarks.quicksort
 
 import java.util
 
-import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
-import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
+import gc.{ActorContext, ActorFactory, ActorRef, Behavior, Behaviors, Message}
+import akka.actor.typed.{Behavior => AkkaBehavior}
+import akka.actor.typed.ActorSystem
 import edu.rice.habanero.actors.AkkaImplicits._
 import edu.rice.habanero.actors.{AkkaActor, AkkaActorState, AkkaMsg, BenchmarkMessage}
-
+import edu.rice.habanero.benchmarks.fib.FibonacciAkkaGCActorBenchmark.FibMessage
 import edu.rice.habanero.benchmarks.{Benchmark, BenchmarkRunner}
-import gc.Message
+
 
 /**
  *
@@ -31,7 +32,7 @@ object QuicksortAkkaGCActorBenchmark {
 
     def runIteration() {
 
-      val system = AkkaActorState.newActorSystem("QuickSort", QuickSortActor(null, null))
+      val system = AkkaActorState.newActorSystem("QuickSort", QuicksortGCActor.createRoot())
 
       val input = QuickSortConfig.randomlyInitArray()
 
@@ -45,9 +46,12 @@ object QuicksortAkkaGCActorBenchmark {
     def cleanupIteration(lastIteration: Boolean, execTimeMillis: Double) {
     }
   }
-  object QuickSortActor {
-    def apply(parent: ActorRef[AkkaMsg[QuicksortMsg]], position: Position): Behavior[AkkaMsg[QuicksortMsg]] = {
-      Behaviors.setup(context => new QuickSortActor(context, parent, position))
+  object QuicksortGCActor {
+    def createRoot(): AkkaBehavior[AkkaMsg[QuicksortMsg]] = {
+      Behaviors.setupReceptionist(context => new QuicksortGCActor(context, null, null))
+    }
+    def apply(parent: ActorRef[AkkaMsg[QuicksortMsg]], position: Position): ActorFactory[AkkaMsg[QuicksortMsg]] = {
+      Behaviors.setup(context => new QuicksortGCActor(context, parent, position))
     }
   }
   trait NoRefsMessage extends Message {
@@ -62,7 +66,7 @@ object QuicksortAkkaGCActorBenchmark {
   final case class SortMessage(data: java.util.List[java.lang.Long]) extends QuicksortMsg with NoRefsMessage
   final case class ResultMessage(data: java.util.List[java.lang.Long], position: Position) extends QuicksortMsg with NoRefsMessage
 
-  private class QuickSortActor(context: ActorContext[AkkaMsg[QuicksortMsg]], parent: ActorRef[AkkaMsg[QuicksortMsg]], positionRelativeToParent: Position)
+  private class QuicksortGCActor(context: ActorContext[AkkaMsg[QuicksortMsg]], parent: ActorRef[AkkaMsg[QuicksortMsg]], positionRelativeToParent: Position)
     extends AkkaActor[QuicksortMsg](context) {
 
     private var result: java.util.List[java.lang.Long] = null
@@ -80,6 +84,7 @@ object QuicksortAkkaGCActorBenchmark {
     }
 
     override def process(msg: QuicksortMsg): Behavior[AkkaMsg[QuicksortMsg]] = {
+
       msg match {
         case SortMessage(data) =>
 
@@ -97,18 +102,20 @@ object QuicksortAkkaGCActorBenchmark {
 
             val leftUnsorted = QuickSortConfig.filterLessThan(data, pivot)
             //val leftActor = context.system.actorOf(Props(new QuickSortActor(self, PositionLeft)))
-            val leftActor = context.spawn(QuickSortActor(context.self, PositionLeft), "Actor_Q1")
+            val leftActor = context.spawn(QuicksortGCActor(context.self, PositionLeft), "Actor_Q1")
             AkkaActorState.startActor(leftActor)
             leftActor ! SortMessage(leftUnsorted)
 
             val rightUnsorted = QuickSortConfig.filterGreaterThan(data, pivot)
-            val rightActor = context.spawn(QuickSortActor(context.self, PositionRight), "Actor_Q2")
+            val rightActor = context.spawn(QuicksortGCActor(context.self, PositionRight), "Actor_Q2")
             AkkaActorState.startActor(rightActor)
             rightActor ! SortMessage(rightUnsorted)
 
             result = QuickSortConfig.filterEqualsTo(data, pivot)
             numFragments += 1
+
             this
+
           }
 
         case ResultMessage(data, position) =>
@@ -119,6 +126,7 @@ object QuicksortAkkaGCActorBenchmark {
               temp.addAll(data)
               temp.addAll(result)
               result = temp
+
             } else if (position eq PositionRight) {
               val temp = new util.ArrayList[java.lang.Long]()
               temp.addAll(result)
