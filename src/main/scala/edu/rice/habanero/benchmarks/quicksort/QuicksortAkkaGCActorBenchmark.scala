@@ -4,10 +4,8 @@ import java.util
 
 import gc.{ActorContext, ActorFactory, ActorRef, Behavior, Behaviors, Message}
 import akka.actor.typed.{Behavior => AkkaBehavior}
-import akka.actor.typed.ActorSystem
 import edu.rice.habanero.actors.AkkaImplicits._
-import edu.rice.habanero.actors.{AkkaActor, AkkaActorState, AkkaMsg, BenchmarkMessage}
-import edu.rice.habanero.benchmarks.fib.FibonacciAkkaGCActorBenchmark.FibMessage
+import edu.rice.habanero.actors.{AkkaActorState, AkkaGCActor, AkkaMsg}
 import edu.rice.habanero.benchmarks.{Benchmark, BenchmarkRunner}
 
 
@@ -38,7 +36,7 @@ object QuicksortAkkaGCActorBenchmark {
 
 
       AkkaActorState.startActor(system)
-      system ! SortMessage(input)
+      system ! SortMessage(None, input)
 
       AkkaActorState.awaitTermination(system)
     }
@@ -48,37 +46,46 @@ object QuicksortAkkaGCActorBenchmark {
   }
   object QuicksortGCActor {
     def createRoot(): AkkaBehavior[AkkaMsg[QuicksortMsg]] = {
-      Behaviors.setupReceptionist(context => new QuicksortGCActor(context, null, null))
+      Behaviors.setupReceptionist(context => new QuicksortGCActor(context, null))
     }
-    def apply(parent: ActorRef[AkkaMsg[QuicksortMsg]], position: Position): ActorFactory[AkkaMsg[QuicksortMsg]] = {
-      Behaviors.setup(context => new QuicksortGCActor(context, parent, position))
+    def apply(position: Position): ActorFactory[AkkaMsg[QuicksortMsg]] = {
+      Behaviors.setup(context => new QuicksortGCActor(context, position))
     }
   }
   trait NoRefsMessage extends Message {
     def refs = Seq()
   }
-  sealed trait QuicksortMsg extends Message with NoRefsMessage
-  abstract class Position extends QuicksortMsg
+  sealed trait QuicksortMsg extends Message
+  abstract class Position
   final case object PositionRight extends Position
   final case object PositionLeft extends Position
   final case object PositionInitial extends Position
-  //private abstract class Message
-  final case class SortMessage(data: java.util.List[java.lang.Long]) extends QuicksortMsg with NoRefsMessage
+  final case class SortMessage(parent: Option[ActorRef[AkkaMsg[ResultMessage]]],
+                               data: java.util.List[java.lang.Long])
+      extends QuicksortMsg {
+    def refs: Iterable[ActorRef[AkkaMsg[ResultMessage]]] = parent.toList
+  }
   final case class ResultMessage(data: java.util.List[java.lang.Long], position: Position) extends QuicksortMsg with NoRefsMessage
 
-  private class QuicksortGCActor(context: ActorContext[AkkaMsg[QuicksortMsg]], parent: ActorRef[AkkaMsg[QuicksortMsg]], positionRelativeToParent: Position)
-    extends AkkaActor[QuicksortMsg](context) {
 
-    private var result: java.util.List[java.lang.Long] = null
+  private class QuicksortGCActor(context: ActorContext[AkkaMsg[QuicksortMsg]], positionRelativeToParent: Position)
+    extends AkkaGCActor[QuicksortMsg](context) {
+
+    private var result: java.util.List[java.lang.Long] = _
     private var numFragments = 0
+    private var parent: Option[ActorRef[AkkaMsg[ResultMessage]]] = None
 
-    def notifyParentAndTerminate() {
+    def notifyParentAndTerminate(): Behavior[AkkaMsg[QuicksortMsg]] = {
 
       if (positionRelativeToParent eq PositionInitial) {
         QuickSortConfig.checkSorted(result)
       }
-      if (parent ne null) {
-        parent ! ResultMessage(result, positionRelativeToParent)
+
+      parent match {
+        case None =>
+        case Some(actor) =>
+          actor ! ResultMessage(result, positionRelativeToParent)
+          context.release(actor)
       }
       exit()
     }
@@ -86,7 +93,8 @@ object QuicksortAkkaGCActorBenchmark {
     override def process(msg: QuicksortMsg): Behavior[AkkaMsg[QuicksortMsg]] = {
 
       msg match {
-        case SortMessage(data) =>
+        case SortMessage(parent, data) =>
+          this.parent = parent
 
           val dataLength: Int = data.size()
           if (dataLength < QuickSortConfig.T) {
@@ -101,15 +109,16 @@ object QuicksortAkkaGCActorBenchmark {
             val pivot = data.get(dataLengthHalf)
 
             val leftUnsorted = QuickSortConfig.filterLessThan(data, pivot)
-            //val leftActor = context.system.actorOf(Props(new QuickSortActor(self, PositionLeft)))
-            val leftActor = context.spawn(QuicksortGCActor(context.self, PositionLeft), "Actor_Q1")
+            val leftActor = context.spawn(QuicksortGCActor(PositionLeft), "Actor_Q1")
             AkkaActorState.startActor(leftActor)
-            leftActor ! SortMessage(leftUnsorted)
+            val self1 = context.createRef(context.self, leftActor)
+            leftActor ! SortMessage(Some(self1), leftUnsorted)
 
             val rightUnsorted = QuickSortConfig.filterGreaterThan(data, pivot)
-            val rightActor = context.spawn(QuicksortGCActor(context.self, PositionRight), "Actor_Q2")
+            val rightActor = context.spawn(QuicksortGCActor(PositionRight), "Actor_Q2")
             AkkaActorState.startActor(rightActor)
-            rightActor ! SortMessage(rightUnsorted)
+            val self2 = context.createRef(context.self, rightActor)
+            rightActor ! SortMessage(Some(self2), rightUnsorted)
 
             result = QuickSortConfig.filterEqualsTo(data, pivot)
             numFragments += 1
