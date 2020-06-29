@@ -9,19 +9,24 @@ import edu.rice.habanero.actors.{AkkaActorState, AkkaGCActor, AkkaMsg}
 
 object RandomGraphsAkkaGCActorBenchmark {
 
-  trait NoRefsMessage extends Message {
-    def refs = Seq()
+
+  sealed trait RandomGraphsMsg extends Message
+
+  final case class Link(ref: ActorRef[RandomGraphsMsg]) extends RandomGraphsMsg {
+    def refs = Seq(ref)
   }
 
-  sealed trait RandomGraphsMsg extends Message with NoRefsMessage
-  final case class Link(ref: ActorRef[RandomGraphsMsg]) extends RandomGraphsMsg
-  final case class Ping() extends RandomGraphsMsg with NoRefsMessage
+  final case class Ping() extends RandomGraphsMsg {
+    def refs = Seq()
+  }
 
 
   object BenchmarkActor {
     def apply(): ActorFactory[AkkaMsg[RandomGraphsMsg]] = {
       Behaviors.setup(context => new BenchmarkActor(context))
     }
+
+    //createRoot()
   }
 
   private class BenchmarkActor(context: ActorContext[AkkaMsg[RandomGraphsMsg]])

@@ -10,14 +10,9 @@ import gc.Message
 
 object RandomGraphsAkkaActorBenchmark {
 
-  trait NoRefsMessage extends Message {
-    def refs = Seq()
-  }
-
-  sealed trait RandomGraphsMsg extends Message with NoRefsMessage
-  final case class Link(ref: ActorRef[RandomGraphsMsg]) extends RandomGraphsMsg
-  final case class Ping() extends RandomGraphsMsg with NoRefsMessage
-
+  sealed trait RandomGraphsMsg
+  final case class Link(ref: ActorRef[RandomGraphsMsg])
+  final case class Ping()
 
   object BenchmarkActor {
     def apply(): Behavior[AkkaMsg[RandomGraphsMsg]] = {
