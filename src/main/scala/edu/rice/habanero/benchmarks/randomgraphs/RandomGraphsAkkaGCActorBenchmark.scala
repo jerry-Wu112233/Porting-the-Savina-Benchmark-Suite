@@ -1,27 +1,36 @@
 package edu.rice.habanero.benchmarks
 
-import java.util
-
-import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
-import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
-import edu.rice.habanero.actors.{AkkaActor, AkkaMsg}
-import gc.Message
 
 
-object RandomGraphsAkkaActorBenchmark {
+import gc.{ActorContext, ActorFactory, ActorRef, Behavior, Behaviors, Message}
+import edu.rice.habanero.actors.{AkkaActorState, AkkaGCActor, AkkaMsg}
 
-  sealed trait RandomGraphsMsg
-  final case class Link(ref: ActorRef[RandomGraphsMsg])
-  final case class Ping()
+
+
+object RandomGraphsAkkaGCActorBenchmark {
+
+
+  sealed trait RandomGraphsMsg extends Message
+
+  final case class Link(ref: ActorRef[RandomGraphsMsg]) extends RandomGraphsMsg {
+    def refs = Seq(ref)
+  }
+
+  final case class Ping() extends RandomGraphsMsg {
+    def refs = Seq()
+  }
+
 
   object BenchmarkActor {
-    def apply(): Behavior[AkkaMsg[RandomGraphsMsg]] = {
+    def apply(): ActorFactory[AkkaMsg[RandomGraphsMsg]] = {
       Behaviors.setup(context => new BenchmarkActor(context))
     }
+
+    //createRoot()
   }
 
   private class BenchmarkActor(context: ActorContext[AkkaMsg[RandomGraphsMsg]])
-    extends AkkaActor[RandomGraphsMsg](context) {
+    extends AkkaGCActor[RandomGraphsMsg](context) {
 
     /** a list of references to other actors */
     private var acquaintances: Set[ActorRef[RandomGraphsMsg]] = Set()
@@ -30,14 +39,17 @@ object RandomGraphsAkkaActorBenchmark {
     def spawnActor(): Unit = {
       val child: ActorRef[AkkaMsg[RandomGraphsMsg]] = context.spawn(BenchmarkActor(), "new Actor")
       acquaintances += child
+
     }
 
     def forgetActor(ref: ActorRef[RandomGraphsMsg]): Unit = {
+      context.release(ref)
       acquaintances -= ref
     }
 
     def linkActors(owner: ActorRef[RandomGraphsMsg], target: ActorRef[RandomGraphsMsg]): Unit = {
-      owner ! Link(target)
+      owner ! Link(context.createRef(target, owner))
+
     }
 
     def ping(ref: ActorRef[RandomGraphsMsg]): Unit = {
@@ -45,13 +57,14 @@ object RandomGraphsAkkaActorBenchmark {
     }
 
     override def process(msg: RandomGraphsMsg): Behavior[AkkaMsg[RandomGraphsMsg]] = {
+
       msg match {
         case Link(ref) =>
           acquaintances += ref
-          Behaviors.same
+          this
 
         case Ping() =>
-          Behaviors.same
+          this
       }
     }
 
