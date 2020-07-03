@@ -1,19 +1,19 @@
 package edu.rice.habanero.benchmarks
 
 object RandomGraphsParam {
-  /** M is a configurable fixed parameter that decides the amount of action an Actor will perform */
-  val constantM : Int = 40
+  /** M is a configurable fixed parameter that decides the number of action an Actor will perform */
+  val NumberOfActions : Int = 40
   /** N is a configurable fixed parameter that decides the amount of Actors will be generated */
-  val constantN : Int = 10
+  val NumberOfSpawns : Int = 10
   /** P1 is the probability for Action 1: Spawning an Actor */
-  val constantP1 : Double = 0.2
+  val ProbabilityToSpawn : Double = 0.2
   /** P2 is the probability for Action 2: Sending a ref from one Actor to another*/
-  val constantP2 : Double = 0.2
+  val ProbabilityToSendRef : Double = 0.2
   /** P3 is the probability for Action 3: Releasing refereces to Actors */
-  val constantP3 : Double = 0.2
+  val ProbabilityToReleaseRef : Double = 0.2
   /** P4 is the probability for Action 4: Sending Application Messages to Actors */
-  val constantP4 : Double = 0.2
+  val ProbabilityToPing : Double = 0.2
   /** P is the amount of ping messages that will be sent  */
-  val constantP : Int = 10
+  val NumberOfPingsSent : Int = 10
 
 }

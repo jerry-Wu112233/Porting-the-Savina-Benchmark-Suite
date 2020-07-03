@@ -5,7 +5,7 @@ package edu.rice.habanero.benchmarks
 import java.util.concurrent.CountDownLatch
 
 import akka.actor.typed.{Behavior => AkkaBehavior}
-import edu.rice.habanero.actors.{AkkaActorState, AkkaGCActor, AkkaMsg}
+import edu.rice.habanero.actors.{AkkaActorState, AkkaGCActor, AkkaMsg, BenchmarkMessage}
 import gc._
 
 import scala.util.Random
@@ -36,15 +36,15 @@ object RandomGraphsAkkaGCActorBenchmark {
 
 
     def runIteration(): Unit = {
-      var countdownLatch: CountDownLatch = new CountDownLatch(RandomGraphsParam.constantN)
+      var countdownLatch: CountDownLatch = new CountDownLatch(RandomGraphsParam.NumberOfSpawns)
 
       val system = AkkaActorState.newActorSystem("RandomGraphs", BenchmarkActor.createRoot(countdownLatch))
 
-      AkkaActorState.startActor(system)
-      var x = 0
-      for (x <- 1 to RandomGraphsParam.constantP) {
-        system ! Ping()
+
+      for (x <- 1 to RandomGraphsParam.NumberOfPingsSent) {
+        system ! BenchmarkMessage(Ping())
       }
+      countdownLatch.await()
     }
 
   }
@@ -79,29 +79,29 @@ object RandomGraphsAkkaGCActorBenchmark {
     }
 
     def linkActors(owner: ActorRef[AkkaMsg[RandomGraphsMsg]], target: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
-      owner ! Link(context.createRef(target, owner))
+      owner ! BenchmarkMessage(Link(context.createRef(target, owner)))
 
     }
 
-    def ping(ref: ActorRef[RandomGraphsMsg]): Unit = {
-      ref ! Ping()
+    def ping(ref: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
+      ref ! BenchmarkMessage(Ping())
     }
 
     def doSomeActions(): Unit = {
       /** generates a list size of M of random doubles between 0.0 to 1.0 */
-      val probabilities: List[Double] = List.fill(RandomGraphsParam.constantM)(scala.util.Random.nextDouble())
-      for (r <- probabilities) {
-        r match {
-          case (r < RandomGraphsParam.constantP1) =>
-            spawnActor()
-          case (r < RandomGraphsParam.constantP1 + RandomGraphsParam.constantP2) =>
-            linkActors(randomItem(acquaintances), randomItem(acquaintances))
-          case (r < RandomGraphsParam.constantP1 + RandomGraphsParam.constantP2 + RandomGraphsParam.constantP3) =>
-            forgetActor(randomItem(acquaintances))
-          case (r <  RandomGraphsParam.constantP1 + RandomGraphsParam.constantP2 + RandomGraphsParam.constantP3 + RandomGraphsParam.constantP4) =>
-            randomItem(acquaintances) ! AppMsg(ping())
-          case _ =>
+      val probabilities: List[Double] = List.fill(RandomGraphsParam.NumberOfActions)(scala.util.Random.nextDouble())
+      import RandomGraphsParam._
+      val acquaintancesIsEmpty: Boolean = acquaintances.isEmpty
 
+      for (r <- probabilities) {
+        if (r < RandomGraphsParam.ProbabilityToSpawn) {
+          spawnActor()
+        } else if ((r < ProbabilityToSpawn + ProbabilityToSendRef) && !acquaintancesIsEmpty) {
+          linkActors(randomItem(acquaintances), randomItem(acquaintances))
+        } else if (r < ProbabilityToSpawn + ProbabilityToSendRef + ProbabilityToReleaseRef && !acquaintancesIsEmpty) {
+          forgetActor(randomItem(acquaintances))
+        } else if (r < ProbabilityToSpawn + ProbabilityToSendRef + ProbabilityToReleaseRef + ProbabilityToPing && !acquaintancesIsEmpty) {
+          ping(randomItem(acquaintances))
         }
       }
     }

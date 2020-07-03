@@ -4,8 +4,8 @@ import java.util.concurrent.CountDownLatch
 
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior}
-import edu.rice.habanero.actors.{AkkaActor, AkkaActorState, AkkaMsg}
-import gc.{AnyActorRef, AppMsg, Message}
+import edu.rice.habanero.actors.{AkkaActor, AkkaActorState, AkkaMsg, BenchmarkMessage}
+import gc.Message
 
 import scala.util.Random
 
@@ -15,16 +15,17 @@ object RandomGraphsAkkaActorBenchmark {
 
   sealed trait RandomGraphsMsg extends Message
 
-  final case class Link(ref: ActorRef[AkkaMsg[RandomGraphsMsg]]) extends RandomGraphsMsg with Message {
-    override def refs: Iterable[AnyActorRef] = Iterable(ref)
+  final case class Link(ref: ActorRef[AkkaMsg[RandomGraphsMsg]]) extends RandomGraphsMsg {
+    override def refs = Seq()
   }
 
   final case class Ping() extends RandomGraphsMsg {
-    override def refs = Seq()
+    def refs = Seq()
   }
 
   private final class RandomGraphsAkkaActorBenchmark extends Benchmark {
     def initialize(args: Array[String]): Unit = {
+
     }
 
     def printArgInfo(): Unit = {
@@ -35,15 +36,14 @@ object RandomGraphsAkkaActorBenchmark {
 
 
     def runIteration(): Unit = {
-      var countdownLatch: CountDownLatch = new CountDownLatch(RandomGraphsParam.constantN)
+      var countdownLatch: CountDownLatch = new CountDownLatch(RandomGraphsParam.NumberOfSpawns)
 
       val system = AkkaActorState.newActorSystem("RandomGraphs", BenchmarkActor(countdownLatch))
 
-      AkkaActorState.startActor(system)
-      var x = 0
-      for (x <- 1 to RandomGraphsParam.constantP) {
-        system ! Ping()
+      for (x <- 1 to RandomGraphsParam.NumberOfPingsSent) {
+        system ! BenchmarkMessage(Ping())
       }
+      countdownLatch.await()
     }
 
   }
@@ -72,31 +72,32 @@ object RandomGraphsAkkaActorBenchmark {
     }
 
     def linkActors(owner: ActorRef[AkkaMsg[RandomGraphsMsg]], target: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
-      owner ! Link(target)
+      owner ! BenchmarkMessage(Link(target))
     }
 
     def ping(ref: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
-      ref ! Ping()
+      ref ! BenchmarkMessage(Ping())
     }
 
     def doSomeActions(): Unit = {
       /** generates a list size of M of random doubles between 0.0 to 1.0 */
-      val probabilities: List[Double] = List.fill(RandomGraphsParam.constantM)(scala.util.Random.nextDouble())
-      for (r <- probabilities) {
-        r match {
-          case (r < RandomGraphsParam.constantP1) =>
-            spawnActor()
-          case (r < RandomGraphsParam.constantP1 + RandomGraphsParam.constantP2) =>
-            linkActors(randomItem(acquaintances), randomItem(acquaintances))
-          case (r < RandomGraphsParam.constantP1 + RandomGraphsParam.constantP2 + RandomGraphsParam.constantP3) =>
-            forgetActor(randomItem(acquaintances))
-          case (r <  RandomGraphsParam.constantP1 + RandomGraphsParam.constantP2 + RandomGraphsParam.constantP3 + RandomGraphsParam.constantP4) =>
-            randomItem(acquaintances) ! AppMsg
-          case _ =>
+      val probabilities: List[Double] = List.fill(RandomGraphsParam.NumberOfActions)(scala.util.Random.nextDouble())
+      import RandomGraphsParam._
+      val acquaintancesIsEmpty: Boolean = acquaintances.isEmpty
 
+      for (r <- probabilities) {
+        if (r < RandomGraphsParam.ProbabilityToSpawn) {
+          spawnActor()
+        } else if ((r < ProbabilityToSpawn + ProbabilityToSendRef) && !acquaintancesIsEmpty) {
+          linkActors(randomItem(acquaintances), randomItem(acquaintances))
+        } else if (r < ProbabilityToSpawn + ProbabilityToSendRef + ProbabilityToReleaseRef && !acquaintancesIsEmpty) {
+          forgetActor(randomItem(acquaintances))
+        } else if (r < ProbabilityToSpawn + ProbabilityToSendRef + ProbabilityToReleaseRef + ProbabilityToPing && !acquaintancesIsEmpty) {
+          ping(randomItem(acquaintances))
         }
       }
     }
+
     def randomItem(items: Set[ActorRef[AkkaMsg[RandomGraphsMsg]]]): ActorRef[AkkaMsg[RandomGraphsMsg]] = {
       val i = Random.nextInt(items.size)
       items.view.slice(i, i + 1).head
