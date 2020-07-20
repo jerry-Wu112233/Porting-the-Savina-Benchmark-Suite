@@ -1,6 +1,7 @@
-package edu.rice.habanero.benchmarks
+package edu.rice.habanero.benchmarks.randomgraphs
 
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior}
@@ -12,6 +13,9 @@ import scala.util.Random
 
 object RandomGraphsAkkaActorBenchmark {
 
+  def main(args: Array[String]): Unit = {
+    BenchmarkRunner.runBenchmark(args, new RandomGraphsAkkaActorBenchmark)
+  }
 
   sealed trait RandomGraphsMsg extends Message
 
@@ -23,6 +27,24 @@ object RandomGraphsAkkaActorBenchmark {
     def refs = Seq()
   }
 
+  private final class Statistics {
+    val latch        = new CountDownLatch(RandomGraphsParam.NumberOfSpawns)
+    val linkCount    = new AtomicInteger()
+    val releaseCount = new AtomicInteger()
+    val pingCount    = new AtomicInteger()
+    val noopCount    = new AtomicInteger()
+
+    override def toString: String =
+      s"""
+         |Number of actors created:  ${RandomGraphsParam.NumberOfSpawns}
+         |Number of links created:   ${linkCount.get()}
+         |Number of links released:  ${releaseCount.get()}
+         |Number of pings sent:      ${pingCount.get()}
+         |Number of noops performed: ${noopCount.get()}
+         |Total actions: ${linkCount.get() + releaseCount.get() + pingCount.get() + noopCount.get()}
+         |""".stripMargin
+  }
+
   private final class RandomGraphsAkkaActorBenchmark extends Benchmark {
     def initialize(args: Array[String]): Unit = {
 
@@ -31,30 +53,38 @@ object RandomGraphsAkkaActorBenchmark {
     def printArgInfo(): Unit = {
     }
 
-    def cleanupIteration(lastIteration: Boolean, execTimeMillis: Double) {
+    def cleanupIteration(lastIteration: Boolean, execTimeMillis: Double): Unit = {
+      Thread.sleep(5000) // Give the actor system time to shut down
     }
 
 
     def runIteration(): Unit = {
-      var countdownLatch: CountDownLatch = new CountDownLatch(RandomGraphsParam.NumberOfSpawns)
+      val stats = new Statistics
 
-      val system = AkkaActorState.newActorSystem("RandomGraphs", BenchmarkActor(countdownLatch))
+      val system = AkkaActorState.newActorSystem("RandomGraphs", BenchmarkActor(stats))
 
       for (x <- 1 to RandomGraphsParam.NumberOfPingsSent) {
         system ! BenchmarkMessage(Ping())
       }
-      countdownLatch.await()
+      try {
+        stats.latch.await()
+        system.terminate()
+        println(stats)
+      } catch {
+        case ex: InterruptedException =>
+          ex.printStackTrace()
+      }
     }
 
   }
 
   object BenchmarkActor {
-    def apply(latch: CountDownLatch): Behavior[AkkaMsg[RandomGraphsMsg]] = {
-      Behaviors.setup(context => new BenchmarkActor(context, latch))
+    def apply(statistics: Statistics): Behavior[AkkaMsg[RandomGraphsMsg]] = {
+      Behaviors.setup(context => new BenchmarkActor(context, statistics))
     }
   }
 
-  private class BenchmarkActor(context: ActorContext[AkkaMsg[RandomGraphsMsg]], latch: CountDownLatch)
+  private class BenchmarkActor(context: ActorContext[AkkaMsg[RandomGraphsMsg]], statistics: Statistics)
     extends AkkaActor[RandomGraphsMsg](context) {
 
     /** a list of references to other actors */
@@ -62,20 +92,23 @@ object RandomGraphsAkkaActorBenchmark {
 
     /** spawns a BenchmarkActor and adds the resulting reference to this.acquaintances */
     def spawnActor(): Unit = {
-      val child: ActorRef[AkkaMsg[RandomGraphsMsg]] = context.spawn(BenchmarkActor(latch), "new Actor")
-      latch.countDown()
+      val child: ActorRef[AkkaMsg[RandomGraphsMsg]] = context.spawnAnonymous(BenchmarkActor(statistics))
+      statistics.latch.countDown()
       acquaintances += child
     }
 
     def forgetActor(ref: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
+      //statistics.releaseCount.incrementAndGet()
       acquaintances -= ref
     }
 
     def linkActors(owner: ActorRef[AkkaMsg[RandomGraphsMsg]], target: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
+      //statistics.linkCount.incrementAndGet()
       owner ! BenchmarkMessage(Link(target))
     }
 
     def ping(ref: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
+      //statistics.pingCount.incrementAndGet()
       ref ! BenchmarkMessage(Ping())
     }
 
@@ -83,24 +116,34 @@ object RandomGraphsAkkaActorBenchmark {
       /** generates a list size of M of random doubles between 0.0 to 1.0 */
       val probabilities: List[Double] = List.fill(RandomGraphsParam.NumberOfActions)(scala.util.Random.nextDouble())
       import RandomGraphsParam._
-      val acquaintancesIsEmpty: Boolean = acquaintances.isEmpty
 
       for (r <- probabilities) {
         if (r < RandomGraphsParam.ProbabilityToSpawn) {
           spawnActor()
-        } else if ((r < ProbabilityToSpawn + ProbabilityToSendRef) && !acquaintancesIsEmpty) {
+        }
+        else if (r < ProbabilityToSpawn + ProbabilityToSendRef && acquaintances.nonEmpty) {
           linkActors(randomItem(acquaintances), randomItem(acquaintances))
-        } else if (r < ProbabilityToSpawn + ProbabilityToSendRef + ProbabilityToReleaseRef && !acquaintancesIsEmpty) {
+        }
+        else if (r < ProbabilityToSpawn + ProbabilityToSendRef + ProbabilityToReleaseRef && acquaintances.nonEmpty) {
           forgetActor(randomItem(acquaintances))
-        } else if (r < ProbabilityToSpawn + ProbabilityToSendRef + ProbabilityToReleaseRef + ProbabilityToPing && !acquaintancesIsEmpty) {
+        }
+        else if (r < ProbabilityToSpawn + ProbabilityToSendRef + ProbabilityToReleaseRef + ProbabilityToPing && acquaintances.nonEmpty) {
           ping(randomItem(acquaintances))
+        }
+        else {
+          //statistics.noopCount.incrementAndGet()
         }
       }
     }
 
     def randomItem(items: Set[ActorRef[AkkaMsg[RandomGraphsMsg]]]): ActorRef[AkkaMsg[RandomGraphsMsg]] = {
-      val i = Random.nextInt(items.size)
-      items.view.slice(i, i + 1).head
+      if (items.nonEmpty) {
+        val i = Random.nextInt(items.size)
+        items.view.slice(i, i + 1).head
+      }
+      else {
+        null
+      }
     }
 
     override def process(msg: RandomGraphsMsg): Behavior[AkkaMsg[RandomGraphsMsg]] = {

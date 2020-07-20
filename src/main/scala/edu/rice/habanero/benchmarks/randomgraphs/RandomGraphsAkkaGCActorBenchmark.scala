@@ -1,4 +1,4 @@
-package edu.rice.habanero.benchmarks
+package edu.rice.habanero.benchmarks.randomgraphs
 
 
 
