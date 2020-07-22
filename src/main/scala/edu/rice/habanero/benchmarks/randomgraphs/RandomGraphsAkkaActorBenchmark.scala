@@ -1,14 +1,10 @@
 package edu.rice.habanero.benchmarks.randomgraphs
 
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.atomic.AtomicInteger
-
-import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
+import akka.actor.typed.scaladsl.{AbstractBehavior, ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior}
-import edu.rice.habanero.actors.{AkkaActor, AkkaActorState, AkkaMsg, BenchmarkMessage}
-import gc.Message
+import edu.rice.habanero.actors.AkkaActorState
+import edu.rice.habanero.benchmarks.{Benchmark, BenchmarkRunner}
 
-import scala.util.Random
 
 
 object RandomGraphsAkkaActorBenchmark {
@@ -17,33 +13,11 @@ object RandomGraphsAkkaActorBenchmark {
     BenchmarkRunner.runBenchmark(args, new RandomGraphsAkkaActorBenchmark)
   }
 
-  sealed trait RandomGraphsMsg extends Message
+  sealed trait RandomGraphsMsg
 
-  final case class Link(ref: ActorRef[AkkaMsg[RandomGraphsMsg]]) extends RandomGraphsMsg {
-    override def refs = Seq()
-  }
+  final case class Link(ref: ActorRef[RandomGraphsMsg]) extends RandomGraphsMsg
 
-  final case class Ping() extends RandomGraphsMsg {
-    def refs = Seq()
-  }
-
-  private final class Statistics {
-    val latch        = new CountDownLatch(RandomGraphsParam.NumberOfSpawns)
-    val linkCount    = new AtomicInteger()
-    val releaseCount = new AtomicInteger()
-    val pingCount    = new AtomicInteger()
-    val noopCount    = new AtomicInteger()
-
-    override def toString: String =
-      s"""
-         |Number of actors created:  ${RandomGraphsParam.NumberOfSpawns}
-         |Number of links created:   ${linkCount.get()}
-         |Number of links released:  ${releaseCount.get()}
-         |Number of pings sent:      ${pingCount.get()}
-         |Number of noops performed: ${noopCount.get()}
-         |Total actions: ${linkCount.get() + releaseCount.get() + pingCount.get() + noopCount.get()}
-         |""".stripMargin
-  }
+  final case class Ping() extends RandomGraphsMsg
 
   private final class RandomGraphsAkkaActorBenchmark extends Benchmark {
     def initialize(args: Array[String]): Unit = {
@@ -63,8 +37,8 @@ object RandomGraphsAkkaActorBenchmark {
 
       val system = AkkaActorState.newActorSystem("RandomGraphs", BenchmarkActor(stats))
 
-      for (x <- 1 to RandomGraphsParam.NumberOfPingsSent) {
-        system ! BenchmarkMessage(Ping())
+      for (_ <- 1 to RandomGraphsParam.NumberOfPingsSent) {
+        system ! Ping()
       }
       try {
         stats.latch.await()
@@ -79,74 +53,32 @@ object RandomGraphsAkkaActorBenchmark {
   }
 
   object BenchmarkActor {
-    def apply(statistics: Statistics): Behavior[AkkaMsg[RandomGraphsMsg]] = {
+    def apply(statistics: Statistics): Behavior[RandomGraphsMsg] = {
       Behaviors.setup(context => new BenchmarkActor(context, statistics))
     }
   }
 
-  private class BenchmarkActor(context: ActorContext[AkkaMsg[RandomGraphsMsg]], statistics: Statistics)
-    extends AkkaActor[RandomGraphsMsg](context) {
+  private class BenchmarkActor(context: ActorContext[RandomGraphsMsg], stats: Statistics)
+    extends AbstractBehavior[RandomGraphsMsg](context)
+        with RandomGraphsActor[ActorRef[RandomGraphsMsg]] {
 
-    /** a list of references to other actors */
-    private var acquaintances: Set[ActorRef[AkkaMsg[RandomGraphsMsg]]] = Set()
+    override val statistics: Statistics = stats
+    override val debug: Boolean = true
 
-    /** spawns a BenchmarkActor and adds the resulting reference to this.acquaintances */
-    def spawnActor(): Unit = {
-      val child: ActorRef[AkkaMsg[RandomGraphsMsg]] = context.spawnAnonymous(BenchmarkActor(statistics))
-      statistics.latch.countDown()
-      acquaintances += child
+    override def spawn(): ActorRef[RandomGraphsMsg] =
+      context.spawnAnonymous(BenchmarkActor(stats))
+
+    override def linkActors(owner: ActorRef[RandomGraphsMsg], target: ActorRef[RandomGraphsMsg]): Unit = {
+      owner ! Link(target)
+      super.linkActors(owner, target)
     }
 
-    def forgetActor(ref: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
-      //statistics.releaseCount.incrementAndGet()
-      acquaintances -= ref
+    override def ping(ref: ActorRef[RandomGraphsMsg]): Unit = {
+      ref ! Ping()
+      super.ping(ref)
     }
 
-    def linkActors(owner: ActorRef[AkkaMsg[RandomGraphsMsg]], target: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
-      //statistics.linkCount.incrementAndGet()
-      owner ! BenchmarkMessage(Link(target))
-    }
-
-    def ping(ref: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
-      //statistics.pingCount.incrementAndGet()
-      ref ! BenchmarkMessage(Ping())
-    }
-
-    def doSomeActions(): Unit = {
-      /** generates a list size of M of random doubles between 0.0 to 1.0 */
-      val probabilities: List[Double] = List.fill(RandomGraphsParam.NumberOfActions)(scala.util.Random.nextDouble())
-      import RandomGraphsParam._
-
-      for (r <- probabilities) {
-        if (r < RandomGraphsParam.ProbabilityToSpawn) {
-          spawnActor()
-        }
-        else if (r < ProbabilityToSpawn + ProbabilityToSendRef && acquaintances.nonEmpty) {
-          linkActors(randomItem(acquaintances), randomItem(acquaintances))
-        }
-        else if (r < ProbabilityToSpawn + ProbabilityToSendRef + ProbabilityToReleaseRef && acquaintances.nonEmpty) {
-          forgetActor(randomItem(acquaintances))
-        }
-        else if (r < ProbabilityToSpawn + ProbabilityToSendRef + ProbabilityToReleaseRef + ProbabilityToPing && acquaintances.nonEmpty) {
-          ping(randomItem(acquaintances))
-        }
-        else {
-          //statistics.noopCount.incrementAndGet()
-        }
-      }
-    }
-
-    def randomItem(items: Set[ActorRef[AkkaMsg[RandomGraphsMsg]]]): ActorRef[AkkaMsg[RandomGraphsMsg]] = {
-      if (items.nonEmpty) {
-        val i = Random.nextInt(items.size)
-        items.view.slice(i, i + 1).head
-      }
-      else {
-        null
-      }
-    }
-
-    override def process(msg: RandomGraphsMsg): Behavior[AkkaMsg[RandomGraphsMsg]] = {
+    override def onMessage(msg: RandomGraphsMsg): Behavior[RandomGraphsMsg] = {
       msg match {
         case Link(ref) =>
           acquaintances += ref

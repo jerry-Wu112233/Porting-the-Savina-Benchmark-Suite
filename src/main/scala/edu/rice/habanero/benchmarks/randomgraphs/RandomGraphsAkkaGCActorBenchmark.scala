@@ -1,117 +1,99 @@
 package edu.rice.habanero.benchmarks.randomgraphs
 
-
-
-import java.util.concurrent.CountDownLatch
-
 import akka.actor.typed.{Behavior => AkkaBehavior}
-import edu.rice.habanero.actors.{AkkaActorState, AkkaGCActor, AkkaMsg, BenchmarkMessage}
+import edu.rice.habanero.actors.AkkaActorState
+import edu.rice.habanero.benchmarks.{Benchmark, BenchmarkRunner}
 import gc._
 
-import scala.util.Random
 
 
 object RandomGraphsAkkaGCActorBenchmark {
 
+  def main(args: Array[String]): Unit = {
+    BenchmarkRunner.runBenchmark(args, new RandomGraphsAkkaGCActorBenchmark)
+  }
 
-  sealed trait RandomGraphsMsg extends Message
 
-  final case class Link(ref: ActorRef[AkkaMsg[RandomGraphsMsg]]) extends RandomGraphsMsg {
+  sealed trait Msg extends Message
+
+  final case class Link(ref: ActorRef[Msg]) extends Msg {
     def refs = Seq(ref)
   }
 
-  final case class Ping() extends RandomGraphsMsg {
+  final case class Ping() extends Msg {
     def refs = Seq()
   }
 
-  private final class RandomGraphsAkkaActorBenchmark extends Benchmark {
+  private final class RandomGraphsAkkaGCActorBenchmark extends Benchmark {
     def initialize(args: Array[String]): Unit = {
+
     }
 
     def printArgInfo(): Unit = {
     }
 
-    def cleanupIteration(lastIteration: Boolean, execTimeMillis: Double) {
+    def cleanupIteration(lastIteration: Boolean, execTimeMillis: Double): Unit = {
+      Thread.sleep(5000) // Give the actor system time to shut down
     }
 
 
     def runIteration(): Unit = {
-      var countdownLatch: CountDownLatch = new CountDownLatch(RandomGraphsParam.NumberOfSpawns)
+      val stats = new Statistics
 
-      val system = AkkaActorState.newActorSystem("RandomGraphs", BenchmarkActor.createRoot(countdownLatch))
+      val system = AkkaActorState.newActorSystem("RandomGraphs", BenchmarkActor.createRoot(stats))
 
-
-      for (x <- 1 to RandomGraphsParam.NumberOfPingsSent) {
-        system ! BenchmarkMessage(Ping())
+      for (_ <- 1 to RandomGraphsParam.NumberOfPingsSent) {
+        system ! Ping()
       }
-      countdownLatch.await()
+      try {
+        stats.latch.await()
+        system.terminate()
+        println(stats)
+      } catch {
+        case ex: InterruptedException =>
+          ex.printStackTrace()
+      }
     }
 
   }
 
   object BenchmarkActor {
-    def apply(latch: CountDownLatch): ActorFactory[AkkaMsg[RandomGraphsMsg]] = {
-      Behaviors.setup(context => new BenchmarkActor(context, latch))
+    def apply(statistics: Statistics): ActorFactory[Msg] = {
+      Behaviors.setup(context => new BenchmarkActor(context, statistics))
     }
 
-    def createRoot(latch: CountDownLatch): AkkaBehavior[AkkaMsg[RandomGraphsMsg]] = {
-      Behaviors.setupReceptionist(context => new BenchmarkActor(context, latch))
+    def createRoot(statistics: Statistics): AkkaBehavior[Msg] = {
+      Behaviors.setupReceptionist(context => new BenchmarkActor(context, statistics))
     }
   }
 
-  private class BenchmarkActor(context: ActorContext[AkkaMsg[RandomGraphsMsg]], latch: CountDownLatch)
-    extends AkkaGCActor[RandomGraphsMsg](context) {
+  private class BenchmarkActor(context: ActorContext[Msg], stats: Statistics)
+    extends AbstractBehavior[Msg](context) with RandomGraphsActor[ActorRef[Msg]] {
 
-    /** a list of references to other actors */
-    private var acquaintances: Set[ActorRef[AkkaMsg[RandomGraphsMsg]]] = Set()
 
-    /** spawns a BenchmarkActor and adds the resulting reference to this.acquaintances */
-    def spawnActor(): Unit = {
-      var child: ActorRef[AkkaMsg[RandomGraphsMsg]] = context.spawn(BenchmarkActor(latch), "new Actor")
-      latch.countDown()
-      acquaintances += child
+    override val statistics: Statistics = stats
+    override val debug: Boolean = true
 
+    override def spawn(): ActorRef[Msg] =
+      context.spawnAnonymous(BenchmarkActor(stats))
+
+    override def linkActors(owner: ActorRef[Msg], target: ActorRef[Msg]): Unit = {
+      val ref = context.createRef(target, owner)
+      owner ! Link(ref)
+      super.linkActors(owner, target)
     }
 
-    def forgetActor(ref: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
+    override def forgetActor(ref: ActorRef[Msg]): Unit = {
       context.release(ref)
-      acquaintances -= ref
+      super.forgetActor(ref)
     }
 
-    def linkActors(owner: ActorRef[AkkaMsg[RandomGraphsMsg]], target: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
-      owner ! BenchmarkMessage(Link(context.createRef(target, owner)))
-
+    override def ping(ref: ActorRef[Msg]): Unit = {
+      ref ! Ping()
+      super.ping(ref)
     }
 
-    def ping(ref: ActorRef[AkkaMsg[RandomGraphsMsg]]): Unit = {
-      ref ! BenchmarkMessage(Ping())
-    }
-
-    def doSomeActions(): Unit = {
-      /** generates a list size of M of random doubles between 0.0 to 1.0 */
-      val probabilities: List[Double] = List.fill(RandomGraphsParam.NumberOfActions)(scala.util.Random.nextDouble())
-      import RandomGraphsParam._
-      val acquaintancesIsEmpty: Boolean = acquaintances.isEmpty
-
-      for (r <- probabilities) {
-        if (r < RandomGraphsParam.ProbabilityToSpawn) {
-          spawnActor()
-        } else if ((r < ProbabilityToSpawn + ProbabilityToSendRef) && !acquaintancesIsEmpty) {
-          linkActors(randomItem(acquaintances), randomItem(acquaintances))
-        } else if (r < ProbabilityToSpawn + ProbabilityToSendRef + ProbabilityToReleaseRef && !acquaintancesIsEmpty) {
-          forgetActor(randomItem(acquaintances))
-        } else if (r < ProbabilityToSpawn + ProbabilityToSendRef + ProbabilityToReleaseRef + ProbabilityToPing && !acquaintancesIsEmpty) {
-          ping(randomItem(acquaintances))
-        }
-      }
-    }
-
-    def randomItem(items: Set[ActorRef[AkkaMsg[RandomGraphsMsg]]]): ActorRef[AkkaMsg[RandomGraphsMsg]] = {
-      val i = Random.nextInt(items.size)
-      items.view.slice(i, i + 1).head
-    }
-
-    override def process(msg: RandomGraphsMsg): Behavior[AkkaMsg[RandomGraphsMsg]] = {
+    override def onMessage(msg: Msg): Behavior[Msg] = {
 
       msg match {
         case Link(ref) =>

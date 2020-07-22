@@ -4,7 +4,7 @@ object RandomGraphsParam {
   /** M is a configurable fixed parameter that decides the number of action an Actor will perform */
   val NumberOfActions : Int = 10
   /** N is a configurable fixed parameter that decides the amount of Actors will be generated */
-  val NumberOfSpawns : Int = 100000
+  val NumberOfSpawns : Int = 10000
   /** P1 is the probability for Action 1: Spawning an Actor */
   val ProbabilityToSpawn : Double = 0.01
   /** P2 is the probability for Action 2: Sending a ref from one Actor to another*/
