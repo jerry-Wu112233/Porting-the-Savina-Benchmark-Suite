@@ -2,11 +2,11 @@ package edu.rice.habanero.benchmarks.fib
 
 
 
-import gc.{ActorContext, ActorFactory, ActorRef, Behavior, Behaviors, Message}
-import edu.rice.habanero.actors.{AkkaGCActor, AkkaActorState, AkkaMsg, BenchmarkMessage}
-import edu.rice.habanero.actors.AkkaImplicits._
-import edu.rice.habanero.benchmarks.{Benchmark, BenchmarkRunner}
 import akka.actor.typed.{Behavior => AkkaBehavior}
+import edu.rice.habanero.actors.AkkaImplicits._
+import edu.rice.habanero.actors.{AkkaActorState, AkkaGCActor, AkkaMsg}
+import edu.rice.habanero.benchmarks.{Benchmark, BenchmarkRunner}
+import gc._
 
 /**
  *
